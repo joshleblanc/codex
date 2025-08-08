@@ -10,6 +10,7 @@ use std::fs::OpenOptions;
 use std::fs::remove_file;
 use std::io::Read;
 use std::io::Write;
+use tempfile::NamedTempFile;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
@@ -19,7 +20,6 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
-use tempfile::NamedTempFile;
 use tokio::process::Command;
 
 pub use crate::token_data::TokenData;
@@ -270,12 +270,12 @@ fn ensure_login_script() -> std::io::Result<NamedTempFile> {
     tmp.write_all(SOURCE_FOR_PYTHON_SERVER.as_bytes())?;
     tmp.flush()?;
 
-    Ok(temp)
+    Ok(tmp)
 }
 
 /// Spawn the ChatGPT login Python server as a child process and return a handle to its process.
 pub fn spawn_login_with_chatgpt(codex_home: &Path) -> std::io::Result<SpawnedLogin> {
-    let script_file = ensure_login_script(codex_home)?;
+    let script_file = ensure_login_script()?;
     let mut cmd = std::process::Command::new("python3");
     cmd.arg(&script_file.path())
         .env("CODEX_HOME", codex_home)
@@ -327,9 +327,9 @@ pub fn spawn_login_with_chatgpt(codex_home: &Path) -> std::io::Result<SpawnedLog
 /// recorded in memory. Otherwise, the subprocess's output will be sent to the
 /// current process's stdout/stderr.
 pub async fn login_with_chatgpt(codex_home: &Path, capture_output: bool) -> std::io::Result<()> {
-    let script_path = ensure_login_script(codex_home)?;
+    let script_file = ensure_login_script()?;
     let child = Command::new("python3")
-        .arg(&script_path)
+        .arg(&script_file.path())
         .env("CODEX_HOME", codex_home)
         .env("CODEX_CLIENT_ID", CLIENT_ID)
         .stdin(Stdio::null())
