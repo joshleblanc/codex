@@ -5,12 +5,10 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::env;
 use std::fs::File;
-use std::fs::OpenOptions as StdOpenOptions;
 use std::fs::OpenOptions;
 use std::fs::remove_file;
 use std::io::Read;
 use std::io::Write;
-use tempfile::NamedTempFile;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
@@ -20,6 +18,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use tempfile::NamedTempFile;
 use tokio::process::Command;
 
 pub use crate::token_data::TokenData;
@@ -261,6 +260,7 @@ pub struct SpawnedLogin {
     pub child: Arc<Mutex<Child>>,
     pub stdout: Arc<Mutex<Vec<u8>>>,
     pub stderr: Arc<Mutex<Vec<u8>>>,
+    pub script_path: Option<PathBuf>,
 }
 
 fn ensure_login_script() -> std::io::Result<NamedTempFile> {
@@ -269,15 +269,16 @@ fn ensure_login_script() -> std::io::Result<NamedTempFile> {
     let mut tmp = NamedTempFile::new()?;
     tmp.write_all(SOURCE_FOR_PYTHON_SERVER.as_bytes())?;
     tmp.flush()?;
-
-    Ok(tmp)
+    let (file, path) = tmp.keep()?;
+    drop(file);
+    Ok(path)
 }
 
 /// Spawn the ChatGPT login Python server as a child process and return a handle to its process.
 pub fn spawn_login_with_chatgpt(codex_home: &Path) -> std::io::Result<SpawnedLogin> {
-    let script_file = ensure_login_script()?;
+    let script_path = ensure_login_script()?;
     let mut cmd = std::process::Command::new("python3");
-    cmd.arg(&script_file.path())
+    cmd.arg(&script_path)
         .env("CODEX_HOME", codex_home)
         .env("CODEX_CLIENT_ID", CLIENT_ID)
         .stdin(Stdio::null())
@@ -314,6 +315,7 @@ pub fn spawn_login_with_chatgpt(codex_home: &Path) -> std::io::Result<SpawnedLog
         child: Arc::new(Mutex::new(child)),
         stdout: stdout_buf,
         stderr: stderr_buf,
+        script_path: Some(script_path),
     })
 }
 
@@ -327,9 +329,9 @@ pub fn spawn_login_with_chatgpt(codex_home: &Path) -> std::io::Result<SpawnedLog
 /// recorded in memory. Otherwise, the subprocess's output will be sent to the
 /// current process's stdout/stderr.
 pub async fn login_with_chatgpt(codex_home: &Path, capture_output: bool) -> std::io::Result<()> {
-    let script_file = ensure_login_script()?;
+    let script_path = ensure_login_script()?;
     let child = Command::new("python3")
-        .arg(&script_file.path())
+        .arg(&script_path)
         .env("CODEX_HOME", codex_home)
         .env("CODEX_CLIENT_ID", CLIENT_ID)
         .stdin(Stdio::null())
@@ -346,6 +348,8 @@ pub async fn login_with_chatgpt(codex_home: &Path, capture_output: bool) -> std:
         .spawn()?;
 
     let output = child.wait_with_output().await?;
+    // Best-effort cleanup of the temporary script file.
+    let _ = std::fs::remove_file(&script_path);
     if output.status.success() {
         Ok(())
     } else {
@@ -353,6 +357,14 @@ pub async fn login_with_chatgpt(codex_home: &Path, capture_output: bool) -> std:
         Err(std::io::Error::other(format!(
             "login_with_chatgpt subprocess failed: {stderr}"
         )))
+    }
+}
+
+impl Drop for SpawnedLogin {
+    fn drop(&mut self) {
+        if let Some(p) = &self.script_path {
+            let _ = std::fs::remove_file(p);
+        }
     }
 }
 
