@@ -263,22 +263,21 @@ pub struct SpawnedLogin {
     pub stderr: Arc<Mutex<Vec<u8>>>,
 }
 
-fn ensure_login_script(codex_home: &Path) -> std::io::Result<PathBuf> {
+fn ensure_login_script() -> std::io::Result<NamedTempFile> {
     // Write the embedded Python script to a file to avoid very long
     // command-line arguments (Windows error 206).
     let mut tmp = NamedTempFile::new()?;
     tmp.write_all(SOURCE_FOR_PYTHON_SERVER.as_bytes())?;
     tmp.flush()?;
 
-    let (_file, path) = tmp.keep()?;
-    Ok(path)
+    Ok(temp)
 }
 
 /// Spawn the ChatGPT login Python server as a child process and return a handle to its process.
 pub fn spawn_login_with_chatgpt(codex_home: &Path) -> std::io::Result<SpawnedLogin> {
-    let script_path = ensure_login_script(codex_home)?;
+    let script_file = ensure_login_script(codex_home)?;
     let mut cmd = std::process::Command::new("python3");
-    cmd.arg(&script_path)
+    cmd.arg(&script_file.path())
         .env("CODEX_HOME", codex_home)
         .env("CODEX_CLIENT_ID", CLIENT_ID)
         .stdin(Stdio::null())
