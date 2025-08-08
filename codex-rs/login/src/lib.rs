@@ -263,7 +263,7 @@ pub struct SpawnedLogin {
     pub script_path: Option<PathBuf>,
 }
 
-fn ensure_login_script() -> std::io::Result<NamedTempFile> {
+fn ensure_login_script() -> std::io::Result<PathBuf> {
     // Write the embedded Python script to a file to avoid very long
     // command-line arguments (Windows error 206).
     let mut tmp = NamedTempFile::new()?;
